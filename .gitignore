@@ -1,0 +1,51 @@
+# --- ENVIRONMENTS ---
+scripts/recyclebuddy_env/
+venv/
+.env/
+
+# --- PYTHON CACHE ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+
+# --- DATA ---
+data/preprocessed/
+data/raw/
+data/**/*.npy
+data/**/*.npz
+data/**/*.csv
+data/**/*.zip
+data/**/*.tar
+data/**/*.gz
+
+# --- MODELS ---
+models/
+*.h5
+*.tflite
+*.onnx
+*.ckpt
+*.pb
+*.pt
+*.weights
+
+# --- NOTEBOOK + LOGS ---
+.ipynb_checkpoints/
+*.log
+*.tmp
+*.bak
+artifacts/
+outputs/
+logs/
+
+# --- SYSTEM / OS ---
+.DS_Store
+data/.DS_Store
+scripts/.DS_Store
+Thumbs.db
+
+# --- IDE / EDITOR ---
+.vscode/
+.idea/
+*.swp
