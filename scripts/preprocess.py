@@ -1,6 +1,7 @@
 import os
 os.environ["OPENCV_DISABLE_OPENMP"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
+
 import cv2
 import numpy as np
 from sklearn.model_selection import train_test_split
