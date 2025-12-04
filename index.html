@@ -5,238 +5,215 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RecycleBuddy: Live Classification Demo</title>
 
-    <!-- tailwind for quick, modern styling -->
+    <!-- Tailwind -->
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- tensorflow.js -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+    <!-- TensorFlow + MobileNet -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.5.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet"></script>
 
     <style>
-        /* simple, clean look */
-        body {
-            font-family: 'Inter', sans-serif;
-        }
+        body { font-family: 'Inter', sans-serif; }
 
         #webcam-container {
-            position: relative;
-            width: 100%;
-            max-width: 500px;
-            margin: 0 auto;
-            border-radius: 1.5rem;
-            overflow: hidden;
-            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
-            aspect-ratio: 4 / 3; /* keep consistent camera frame */
-            background-color: #000;
+            position: relative; width: 100%; max-width: 500px;
+            margin: 0 auto; border-radius: 1.5rem; overflow: hidden;
+            box-shadow: 0 15px 30px rgba(0,0,0,0.3);
+            aspect-ratio: 4/3; background-color: #000;
         }
 
-        video,
-        canvas {
-            display: block;
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
+        video, canvas {
+            width: 100%; height: 100%; object-fit: cover;
         }
     </style>
 </head>
 
-<body class="bg-gray-900 min-h-screen p-4 flex flex-col items-center font-sans text-white">
+<body class="bg-gray-900 min-h-screen p-4 flex flex-col items-center text-white">
     <div class="w-full max-w-xl text-center">
         <h1 class="text-4xl font-extrabold text-green-400 mt-4 mb-2">RecycleBuddy ♻️</h1>
-        <p class="text-gray-300 mb-6">
-            live ai classification (recyclable vs. non-recyclable)
-        </p>
+        <p class="text-gray-300 mb-6">live ai classification (demo + real model)</p>
     </div>
 
-    <!-- webcam stream + hidden canvas for resizing frames -->
+    <!-- MODEL TOGGLE -->
+    <div class="bg-gray-800 p-4 rounded-xl shadow-lg mb-4 w-full max-w-xl text-center">
+        <label class="text-lg font-semibold">Choose Model:</label>
+        <select id="model-select"
+                class="mt-2 p-3 bg-gray-700 rounded-lg w-full font-bold text-white text-center border border-gray-600">
+            <option value="demo">Demo Model (MobileNet) — Recommended</option>
+            <option value="real">Real RecycleBuddy Model (TFJS)</option>
+        </select>
+    </div>
+
+    <!-- webcam -->
     <div id="webcam-container">
         <video id="webcam" autoplay playsinline muted></video>
-        <canvas id="canvas" class="hidden"></canvas>
     </div>
 
-    <!-- status + result -->
-    <div
-        id="status-message"
-        class="mt-4 p-3 rounded-xl w-full max-w-xl text-center text-lg font-semibold bg-gray-700 text-gray-200 shadow-xl"
-    >
-        loading model... please wait.
+    <!-- status -->
+    <div id="status-message"
+        class="mt-4 p-3 rounded-xl w-full max-w-xl text-center text-lg font-semibold bg-gray-700 text-gray-200 shadow-xl">
+        select model above, then wait for model to load.
     </div>
 
-    <div
-        id="result-display"
-        class="mt-4 p-6 text-4xl font-bold rounded-xl w-full max-w-xl shadow-2xl transition duration-500 ease-in-out transform scale-100 bg-gray-800 text-gray-200 text-center"
-    >
-        <span class="text-xl">Point your camera at the trash item 📸🚮</span>
+    <!-- result -->
+    <div id="result-display"
+        class="mt-4 p-6 text-4xl font-bold rounded-xl w-full max-w-xl shadow-2xl bg-gray-800 text-center">
+        <span class="text-xl">Point your camera at an item 📸</span>
     </div>
 
+    <!-- start button -->
     <div class="w-full max-w-xl text-center mt-6">
-        <button
-            id="start-button"
-            class="px-8 py-4 bg-green-500 text-white text-2xl font-bold rounded-full hover:bg-green-600 focus:outline-none focus:ring-4 focus:ring-green-400 transition duration-150 shadow-lg hidden"
-            onclick="startPrediction()"
-        >
+        <button id="start-button"
+            class="px-8 py-4 bg-green-500 text-white text-2xl font-bold rounded-full hover:bg-green-600 hidden">
             start live scan
         </button>
     </div>
 
-    <script>
-        // --- config ---
-        // put index.html and tfjs_model_artifacts in the same folder.
-        const MODEL_URL = './tfjs_model_artifacts/model.json';
-        const IMAGE_SIZE = 224; // must match your python model
-        const LABELS = ['RECYCLABLE ♻️', 'NON-RECYCLABLE 🗑️'];
+<script>
+    let model;
+    let webcam;
+    let isPredicting = false;
 
-        // --- globals ---
-        let model;
-        let webcam;
-        let isPredicting = false;
+    const REAL_MODEL_URL = "./tfjs_model_artifacts/model.json"; // your real model
+    const statusEl = document.getElementById("status-message");
+    const resultEl = document.getElementById("result-display");
+    const startButton = document.getElementById("start-button");
+    const modelSelect = document.getElementById("model-select");
 
-        const statusEl = document.getElementById('status-message');
-        const resultEl = document.getElementById('result-display');
-        const startButton = document.getElementById('start-button');
+    // Load the selected model
+    async function loadSelectedModel() {
+        const choice = modelSelect.value;
+        isPredicting = false;
+        startButton.classList.add("hidden");
+        resultEl.textContent = "Point your camera at an item 📸";
 
-        // --- load keras → tfjs model ---
-        async function loadModel() {
-            statusEl.textContent = `loading recyclebuddy model from: ${MODEL_URL}`;
-            try {
-                console.log('tf.js version:', tf.version);
-                console.log('loading model from:', MODEL_URL);
-
-                await tf.ready();
-                model = await tf.loadLayersModel(MODEL_URL);
-
-                console.log('model loaded:', model);
-                statusEl.textContent = 'model loaded. initializing camera...';
-                startButton.classList.remove('hidden');
-            } catch (error) {
-                console.error('failed to load model:', error);
-
-                statusEl.className =
-                    'mt-4 p-3 rounded-xl w-full max-w-xl text-center text-lg font-semibold bg-red-800 text-white shadow-xl';
-
-                // show a more detailed message to help debug
-                const msg = error && error.message ? error.message : String(error);
-                statusEl.textContent =
-                    'error loading model: ' +
-                    msg +
-                    ' (tip: make sure index.html and tfjs_model_artifacts are in the same folder and you are opening this via http://, not file://)';
-            }
+        if (choice === "demo") {
+            await loadDemoModel();
+        } else {
+            await loadRealModel();
         }
+    }
 
-        // --- webcam setup ---
-        async function setupWebcam() {
-            webcam = document.getElementById('webcam');
+    // DEMO: MobileNet model
+    async function loadDemoModel() {
+        try {
+            statusEl.textContent = "Loading MobileNet (demo)…";
 
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                statusEl.textContent = 'error: camera not supported on this device.';
-                return false;
-            }
+            model = await mobilenet.load({ version: 2, alpha: 1.0 });
 
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: false,
-                    video: {
-                        facingMode: 'environment', // try to use back camera on mobile
-                    },
-                });
-
-                webcam.srcObject = stream;
-
-                return new Promise((resolve) => {
-                    webcam.onloadedmetadata = () => {
-                        webcam.play();
-                        resolve(true);
-                    };
-                });
-            } catch (error) {
-                console.error('error accessing webcam:', error);
-                statusEl.textContent = 'camera access denied or failed.';
-                return false;
-            }
+            statusEl.textContent = "MobileNet loaded! Tap start.";
+            startButton.classList.remove("hidden");
+        } catch (err) {
+            statusEl.textContent = "Failed to load MobileNet.";
+            console.error(err);
         }
+    }
 
-        // --- preprocessing: frame → tensor ---
-        function preprocess(videoFrame) {
-            // tidy helps keep gpu/cpu memory clean between frames
-            return tf.tidy(() => {
-                let tensor = tf.browser.fromPixels(videoFrame);
+    // REAL: Load your TFJS RecycleBuddy model
+    async function loadRealModel() {
+        try {
+            statusEl.textContent = "Loading RecycleBuddy Model…";
 
-                // resize to model input
-                const resized = tf.image.resizeBilinear(tensor, [IMAGE_SIZE, IMAGE_SIZE]);
+            model = await tf.loadLayersModel(REAL_MODEL_URL);
 
-                // normalize 0–255 → 0–1 (match training)
-                const normalized = resized.div(tf.scalar(255.0));
+            statusEl.textContent = "RecycleBuddy Model loaded! Tap start.";
+            startButton.classList.remove("hidden");
 
-                // add batch dimension: [h, w, c] → [1, h, w, c]
-                const batched = normalized.expandDims(0);
+        } catch (error) {
+            statusEl.textContent = "Real model FAILED to load.";
+            console.error("Real model error:", error);
+        }
+    }
 
-                return batched;
+    // Webcam setup
+    async function setupWebcam() {
+        const cam = document.getElementById("webcam");
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: "environment" }
             });
-        }
 
-        // --- main prediction loop ---
-        async function predict() {
-            if (!isPredicting || !model || !webcam.srcObject) return;
-
-            // schedule the next frame first to keep things smooth
-            window.requestAnimationFrame(predict);
-
-            tf.tidy(() => {
-                const inputTensor = preprocess(webcam);
-                const predictions = model.predict(inputTensor);
-
-                const values = predictions.dataSync();
-                const classId = values.indexOf(Math.max(...values));
-                const probability = values[classId] * 100;
-
-                const predictionText = `${LABELS[classId]} (${probability.toFixed(0)}%)`;
-                resultEl.textContent = predictionText;
-
-                let bgColor, textColor;
-                if (classId === 0) {
-                    // recyclable
-                    bgColor = 'bg-green-600';
-                    textColor = 'text-white';
-                } else {
-                    // non-recyclable
-                    bgColor = 'bg-red-600';
-                    textColor = 'text-white';
-                }
-
-                resultEl.className = `
-                    mt-4 p-6 text-4xl font-bold rounded-xl w-full max-w-xl
-                    shadow-2xl transition duration-500 ease-in-out transform scale-100
-                    text-center ${bgColor} ${textColor}
-                `;
+            cam.srcObject = stream;
+            return new Promise(resolve => {
+                cam.onloadedmetadata = () => {
+                    cam.play();
+                    resolve(true);
+                };
             });
+        } catch (err) {
+            statusEl.textContent = "Camera unavailable.";
+            console.error(err);
+            return false;
+        }
+    }
+
+    // Map MobileNet predictions → Recyclable / Non Recyclable
+    function mapRecycle(pred) {
+        const recyclable = ["bottle", "plastic", "paper", "cardboard", "metal", "can", "cup"];
+        const label = pred.className.toLowerCase();
+
+        for (let item of recyclable) {
+            if (label.includes(item)) {
+                return { tag: "♻️ RECYCLABLE", color: "bg-green-600" };
+            }
+        }
+        return { tag: "🗑️ NON-RECYCLABLE", color: "bg-red-600" };
+    }
+
+    // Prediction loop (handles BOTH models automatically)
+    async function predict() {
+        if (!isPredicting) return;
+
+        const modelType = modelSelect.value;
+
+        if (modelType === "demo") {
+            const predictions = await model.classify(webcam);
+
+            if (predictions.length > 0) {
+                const mapped = mapRecycle(predictions[0]);
+                resultEl.textContent = `${mapped.tag} (${predictions[0].className})`;
+                resultEl.className =
+                    `mt-4 p-6 text-4xl font-bold rounded-xl w-full max-w-xl text-center text-white shadow-xl ${mapped.color}`;
+            }
+        } else {
+            // REAL MODEL PREDICTION
+            const input = tf.tidy(() => {
+                let t = tf.browser.fromPixels(webcam);
+                t = tf.image.resizeBilinear(t, [224, 224]);
+                t = t.div(255).expandDims(0);
+                return t;
+            });
+
+            const pred = model.predict(input);
+            const values = pred.dataSync();
+            const classId = values.indexOf(Math.max(...values));
+            const label = classId === 0 ? "♻️ RECYCLABLE" : "🗑️ NON-RECYCLABLE";
+            const color = classId === 0 ? "bg-green-600" : "bg-red-600";
+
+            resultEl.textContent = `${label}`;
+            resultEl.className =
+                `mt-4 p-6 text-4xl font-bold rounded-xl w-full max-w-xl text-center text-white shadow-xl ${color}`;
+
+            tf.dispose(input);
         }
 
-        // --- start button handler ---
-        async function startPrediction() {
-            if (!webcam || !webcam.srcObject) {
-                const isReady = await setupWebcam();
-                if (!isReady) return;
-            }
+        requestAnimationFrame(predict);
+    }
 
-            if (!model) {
-                statusEl.textContent = 'model is still loading. please wait...';
-                return;
-            }
+    startButton.addEventListener("click", () => {
+        isPredicting = true;
+        startButton.classList.add("hidden");
+        statusEl.textContent = "Scanning…";
+        predict();
+    });
 
-            statusEl.textContent = 'classification running in real time...';
-            isPredicting = true;
-            startButton.classList.add('hidden');
-            predict();
-        }
+    modelSelect.addEventListener("change", loadSelectedModel);
 
-        // --- page init ---
-        window.onload = async () => {
-            await loadModel();
-            await setupWebcam();
-
-            if (model && webcam && webcam.srcObject) {
-                statusEl.textContent = 'ready! tap “start live scan” to begin.';
-            }
-        };
-    </script>
+    window.onload = async () => {
+        await setupWebcam();
+        statusEl.textContent = "Select a model above to begin.";
+    };
+</script>
 </body>
 </html>
